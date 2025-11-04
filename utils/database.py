@@ -3,6 +3,7 @@ from bson import ObjectId
 import bcrypt
 from datetime import datetime
 import streamlit as st
+import random
 
 class Database:
     def __init__(self):
@@ -38,6 +39,99 @@ class Database:
         self.exams_data = []
         self.results_data = []
         self._create_admin_user_memory()
+        
+        # Create demo questions and exams
+        self._create_demo_data()
+
+    def _create_demo_data(self):
+        """Create demo questions and exams"""
+        # Create demo teacher
+        teacher_id = "teacher_001"
+        hashed_password = self._hash_password('teacher123')
+        self.users_data.append({
+            "_id": teacher_id,
+            "username": "teacher1",
+            "password": hashed_password,
+            "role": "teacher",
+            "name": "Demo Teacher",
+            "email": "teacher@demo.com",
+            "createdAt": datetime.now()
+        })
+        
+        # Create demo questions
+        demo_questions = [
+            {
+                "_id": "q_1",
+                "text": "What is the capital of France?",
+                "options": [
+                    {"text": "London", "isCorrect": False, "id": "opt_1"},
+                    {"text": "Paris", "isCorrect": True, "id": "opt_2"},
+                    {"text": "Berlin", "isCorrect": False, "id": "opt_3"},
+                    {"text": "Madrid", "isCorrect": False, "id": "opt_4"}
+                ],
+                "createdBy": teacher_id,
+                "createdAt": datetime.now()
+            },
+            {
+                "_id": "q_2",
+                "text": "Which programming language is known for its use in web development?",
+                "options": [
+                    {"text": "Python", "isCorrect": False, "id": "opt_1"},
+                    {"text": "JavaScript", "isCorrect": True, "id": "opt_2"},
+                    {"text": "C++", "isCorrect": False, "id": "opt_3"},
+                    {"text": "Java", "isCorrect": False, "id": "opt_4"}
+                ],
+                "createdBy": teacher_id,
+                "createdAt": datetime.now()
+            },
+            {
+                "_id": "q_3",
+                "text": "What does CPU stand for?",
+                "options": [
+                    {"text": "Computer Processing Unit", "isCorrect": False, "id": "opt_1"},
+                    {"text": "Central Processing Unit", "isCorrect": True, "id": "opt_2"},
+                    {"text": "Central Program Utility", "isCorrect": False, "id": "opt_3"},
+                    {"text": "Computer Program Unit", "isCorrect": False, "id": "opt_4"}
+                ],
+                "createdBy": teacher_id,
+                "createdAt": datetime.now()
+            }
+        ]
+        
+        self.questions_data.extend(demo_questions)
+        
+        # Create demo exams
+        demo_exams = [
+            {
+                "_id": "exam_1",
+                "title": "Geography Basics",
+                "duration": 5,
+                "questions": ["q_1"],  # Only first question
+                "createdBy": teacher_id,
+                "isPublished": True,  # Published by default
+                "createdAt": datetime.now()
+            },
+            {
+                "_id": "exam_2",
+                "title": "Programming Fundamentals", 
+                "duration": 10,
+                "questions": ["q_2"],  # Only second question
+                "createdBy": teacher_id,
+                "isPublished": False,  # Not published
+                "createdAt": datetime.now()
+            },
+            {
+                "_id": "exam_3",
+                "title": "Computer Science Test",
+                "duration": 15,
+                "questions": ["q_1", "q_2", "q_3"],  # All questions
+                "createdBy": teacher_id,
+                "isPublished": True,  # Published by default
+                "createdAt": datetime.now()
+            }
+        ]
+        
+        self.exams_data.extend(demo_exams)
 
     def _create_admin_user_memory(self):
         """Create admin user in memory"""
@@ -88,6 +182,15 @@ class Database:
     # User Management Methods
     def create_user(self, username, password, role, name, email):
         try:
+            # Check if username already exists
+            if self.using_mongodb:
+                existing_user = self.users.find_one({"username": username})
+            else:
+                existing_user = next((u for u in self.users_data if u.get('username') == username), None)
+            
+            if existing_user:
+                return None, "Username already exists"
+                
             hashed_password = self._hash_password(password)
             user_data = {
                 "username": username,
@@ -230,12 +333,19 @@ class Database:
                 exams = self.exams.find({"createdBy": teacher_id})
                 exam_list = []
                 for exam in exams:
-                    questions = self.questions.find({"_id": {"$in": exam.get("questions", [])}})
+                    # Get questions for this exam
+                    question_ids = exam.get("questions", [])
+                    questions = []
+                    for qid in question_ids:
+                        question = self.questions.find_one({"_id": ObjectId(qid)})
+                        if question:
+                            questions.append(question)
+                    
                     exam_data = {
                         "id": str(exam.get("_id", "")),
                         "title": exam.get("title", ""),
                         "duration": exam.get("duration", 30),
-                        "questions": list(questions),
+                        "questions": questions,
                         "isPublished": exam.get("isPublished", False),
                         "createdAt": exam.get("createdAt", datetime.now())
                     }
@@ -243,9 +353,26 @@ class Database:
                 return exam_list
             else:
                 teacher_exams = [e for e in self.exams_data if e.get('createdBy') == teacher_id]
+                exam_list = []
                 for exam in teacher_exams:
-                    exam["id"] = exam.get("_id", "")
-                return teacher_exams
+                    # Get questions for this exam
+                    question_ids = exam.get('questions', [])
+                    questions = []
+                    for qid in question_ids:
+                        question = next((q for q in self.questions_data if q.get('_id') == qid), None)
+                        if question:
+                            questions.append(question)
+                    
+                    exam_data = {
+                        "id": exam.get("_id", ""),
+                        "title": exam.get("title", ""),
+                        "duration": exam.get("duration", 30),
+                        "questions": questions,
+                        "isPublished": exam.get("isPublished", False),
+                        "createdAt": exam.get("createdAt", datetime.now())
+                    }
+                    exam_list.append(exam_data)
+                return exam_list
         except Exception as e:
             st.error(f"Error getting teacher exams: {e}")
             return []
@@ -259,12 +386,13 @@ class Database:
                 )
                 return result.modified_count > 0
             else:
-                exam = next((e for e in self.exams_data if e.get('_id') == exam_id), None)
+                exam = next((e for e in self.exams_data if e.get('_id') == exam_id and e.get('createdBy') == teacher_id), None)
                 if exam:
                     exam["isPublished"] = True
                     return True
                 return False
-        except:
+        except Exception as e:
+            st.error(f"Error publishing exam: {e}")
             return False
 
     def get_published_exams(self):
@@ -273,23 +401,50 @@ class Database:
                 exams = self.exams.find({"isPublished": True})
                 exam_list = []
                 for exam in exams:
-                    teacher = self.users.find_one({"_id": ObjectId(exam.get("createdBy", ""))})
-                    questions = self.questions.find({"_id": {"$in": exam.get("questions", [])}})
+                    # Get teacher info
+                    teacher = self.get_user_by_id(exam.get("createdBy", ""))
+                    
+                    # Get questions for this exam
+                    question_ids = exam.get("questions", [])
+                    questions = []
+                    for qid in question_ids:
+                        question = self.questions.find_one({"_id": ObjectId(qid)})
+                        if question:
+                            questions.append(question)
+                    
                     exam_data = {
                         "id": str(exam.get("_id", "")),
                         "title": exam.get("title", ""),
                         "duration": exam.get("duration", 30),
-                        "questions": list(questions),
-                        "teacher": teacher.get("name", "Unknown") if teacher else "Unknown"
+                        "questions": questions,
+                        "teacher": teacher.get("name", "Unknown") if teacher else "Unknown",
+                        "isPublished": exam.get("isPublished", False)
                     }
                     exam_list.append(exam_data)
                 return exam_list
             else:
+                # In-memory database
                 published_exams = [e for e in self.exams_data if e.get('isPublished')]
+                exam_list = []
                 for exam in published_exams:
-                    exam["id"] = exam.get("_id", "")
-                    exam["teacher"] = "Demo Teacher"
-                return published_exams
+                    # Get questions for this exam
+                    question_ids = exam.get('questions', [])
+                    questions = []
+                    for qid in question_ids:
+                        question = next((q for q in self.questions_data if q.get('_id') == qid), None)
+                        if question:
+                            questions.append(question)
+                    
+                    exam_data = {
+                        "id": exam.get("_id", ""),
+                        "title": exam.get("title", ""),
+                        "duration": exam.get("duration", 30),
+                        "questions": questions,
+                        "teacher": "Demo Teacher",
+                        "isPublished": exam.get("isPublished", False)
+                    }
+                    exam_list.append(exam_data)
+                return exam_list
         except Exception as e:
             st.error(f"Error getting published exams: {e}")
             return []
@@ -305,17 +460,39 @@ class Database:
             if not exam:
                 return None, "Exam not found"
 
-            # Simple scoring - for demo, give random score
-            import random
-            score = random.randint(5, len(answers))
-            total = len(answers)
+            # Calculate actual score based on correct answers
+            score = 0
+            total_questions = len(exam.get('questions', []))
+            
+            for answer in answers:
+                question_id = answer.get('question_id')
+                selected_option_id = answer.get('selected_option_id')
+                
+                if not selected_option_id:
+                    continue  # Skip unanswered questions
+                    
+                # Find the question
+                if self.using_mongodb:
+                    question = self.questions.find_one({"_id": ObjectId(question_id)})
+                else:
+                    question = next((q for q in self.questions_data if str(q.get('_id')) == question_id), None)
+                
+                if question:
+                    # Find the selected option and check if it's correct
+                    options = question.get('options', [])
+                    selected_option = next((opt for opt in options if opt.get('id') == selected_option_id), None)
+                    if selected_option and selected_option.get('isCorrect'):
+                        score += 1
+
+            percentage = (score / total_questions) * 100 if total_questions > 0 else 0
 
             result_data = {
                 "exam": exam_id,
                 "student": student_id,
                 "answers": answers,
                 "score": score,
-                "total": total,
+                "total": total_questions,
+                "percentage": percentage,
                 "submittedAt": datetime.now()
             }
             
@@ -342,7 +519,7 @@ class Database:
                         "exam_title": exam.get("title", "Unknown Exam") if exam else "Unknown Exam",
                         "score": result.get("score", 0),
                         "total": result.get("total", 1),
-                        "percentage": (result.get("score", 0) / result.get("total", 1)) * 100,
+                        "percentage": result.get("percentage", 0),
                         "submittedAt": result.get("submittedAt", datetime.now())
                     }
                     result_list.append(result_data)
@@ -357,7 +534,7 @@ class Database:
                         "exam_title": exam.get("title", "Unknown Exam") if exam else "Unknown Exam",
                         "score": result.get("score", 0),
                         "total": result.get("total", 1),
-                        "percentage": (result.get("score", 0) / result.get("total", 1)) * 100,
+                        "percentage": result.get("percentage", 0),
                         "submittedAt": result.get("submittedAt", datetime.now())
                     }
                     result_list.append(result_data)
@@ -372,7 +549,7 @@ class Database:
                 exams = self.exams.find()
                 exam_list = []
                 for exam in exams:
-                    teacher = self.users.find_one({"_id": ObjectId(exam.get("createdBy", ""))})
+                    teacher = self.get_user_by_id(exam.get("createdBy", ""))
                     exam_data = {
                         "id": str(exam.get("_id", "")),
                         "title": exam.get("title", ""),
@@ -413,7 +590,7 @@ class Database:
                         "student_name": student.get("name", "Unknown") if student else "Unknown",
                         "score": result.get("score", 0),
                         "total": result.get("total", 1),
-                        "percentage": (result.get("score", 0) / result.get("total", 1)) * 100,
+                        "percentage": result.get("percentage", 0),
                         "submittedAt": result.get("submittedAt", datetime.now())
                     }
                     result_list.append(result_data)
@@ -429,7 +606,7 @@ class Database:
                         "student_name": student.get("name", "Unknown") if student else "Unknown",
                         "score": result.get("score", 0),
                         "total": result.get("total", 1),
-                        "percentage": (result.get("score", 0) / result.get("total", 1)) * 100,
+                        "percentage": result.get("percentage", 0),
                         "submittedAt": result.get("submittedAt", datetime.now())
                     }
                     result_list.append(result_data)
@@ -441,18 +618,24 @@ class Database:
     def get_analytics(self):
         try:
             results = self.get_all_results()
+            users = self.get_all_users()
+            exams = self.get_all_exams()
+            
+            total_exams = len(exams)
+            total_students = len([u for u in users if u.get('role') == 'student'])
+            total_attempts = len(results)
+            
             if results:
-                total_exams = len(set(r.get('exam_title', '') for r in results))
-                total_students = len(set(r.get('student_name', '') for r in results))
                 avg_score = sum(r.get('percentage', 0) for r in results) / len(results) if results else 0
-                
-                return {
-                    "total_exams": total_exams,
-                    "total_students": total_students,
-                    "average_score": avg_score,
-                    "total_attempts": len(results)
-                }
-            return {}
+            else:
+                avg_score = 0
+            
+            return {
+                "total_exams": total_exams,
+                "total_students": total_students,
+                "average_score": avg_score,
+                "total_attempts": total_attempts
+            }
         except Exception as e:
             st.error(f"Error getting analytics: {e}")
             return {}
