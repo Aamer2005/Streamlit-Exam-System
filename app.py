@@ -687,7 +687,7 @@ def submit_exam(user, exam):
 def show_admin_dashboard(user):
     st.title("👨‍💼 Admin Dashboard")
     
-    tab1, tab2, tab3 = st.tabs(["User Management", "System Overview", "Analytics"])
+    tab1, tab2, tab3, tab4 = st.tabs(["User Management", "Exam Management", "System Overview", "Analytics"])
     
     with tab1:
         st.subheader("User Management")
@@ -730,18 +730,51 @@ def show_admin_dashboard(user):
                 
                 if users:
                     st.info(f"Total Users: {len(users)}")
-                    for user in users:
-                        col1, col2 = st.columns([3, 1])
+                    
+                    # Filter options
+                    col_filter1, col_filter2 = st.columns(2)
+                    with col_filter1:
+                        role_filter = st.selectbox("Filter by Role", ["All", "student", "teacher", "admin"])
+                    with col_filter2:
+                        search_term = st.text_input("Search by name or username")
+                    
+                    filtered_users = users
+                    if role_filter != "All":
+                        filtered_users = [u for u in filtered_users if u.get('role') == role_filter]
+                    if search_term:
+                        filtered_users = [u for u in filtered_users if search_term.lower() in u.get('name', '').lower() or search_term.lower() in u.get('username', '').lower()]
+                    
+                    st.write(f"Showing {len(filtered_users)} users")
+                    
+                    for user_data in filtered_users:
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        
                         with col1:
-                            st.write(f"**{user.get('name', 'No Name')}** ({user.get('role', 'student')})")
-                            st.write(f"Username: {user.get('username', 'No username')} | Email: {user.get('email', 'No email')}")
-                            created_date = user.get('createdAt', datetime.now())
+                            role_icon = "👨‍🎓" if user_data.get('role') == 'student' else "👨‍🏫" if user_data.get('role') == 'teacher' else "👨‍💼"
+                            st.write(f"**{role_icon} {user_data.get('name', 'No Name')}** ({user_data.get('role', 'student')})")
+                            st.write(f"👤 Username: {user_data.get('username', 'No username')}")
+                            st.write(f"📧 Email: {user_data.get('email', 'No email')}")
+                            created_date = user_data.get('createdAt', datetime.now())
                             if hasattr(created_date, 'strftime'):
-                                st.write(f"Created: {created_date.strftime('%Y-%m-%d')}")
+                                st.write(f"📅 Created: {created_date.strftime('%Y-%m-%d')}")
                             else:
-                                st.write(f"Created: {created_date}")
+                                st.write(f"📅 Created: {created_date}")
+                        
                         with col2:
-                            st.write(f"ID: {user.get('_id', '')[:8]}...")
+                            st.write(f"🆔 ID: {user_data.get('_id', '')[:8]}...")
+                        
+                        with col3:
+                            # Prevent admin from deleting their own account
+                            if user_data.get('_id') != user['id']:
+                                if st.button("🗑️ Delete", key=f"delete_user_{user_data.get('_id', '')}", type="secondary"):
+                                    if db.delete_user(user_data.get('_id', '')):
+                                        st.success(f"User {user_data.get('name')} deleted successfully!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to delete user")
+                            else:
+                                st.write("👤 Current User")
+                        
                         st.divider()
                 else:
                     st.info("No users found.")
@@ -750,6 +783,162 @@ def show_admin_dashboard(user):
                 st.error(f"Error loading users: {e}")
     
     with tab2:
+        st.subheader("Exam Management")
+        
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.subheader("Quick Actions")
+            
+            # Publish all exams button
+            if st.button("📢 Publish All Draft Exams", use_container_width=True):
+                try:
+                    db = st.session_state.db
+                    exams = db.get_all_exams()
+                    draft_exams = [e for e in exams if not e.get('isPublished')]
+                    
+                    if draft_exams:
+                        success_count = 0
+                        for exam in draft_exams:
+                            # For admin, we need to get the teacher ID who created the exam
+                            teacher_id = None
+                            if db.using_mongodb:
+                                exam_details = db.exams.find_one({"_id": ObjectId(exam.get('id'))})
+                                if exam_details:
+                                    teacher_id = exam_details.get('createdBy')
+                            else:
+                                exam_details = next((e for e in db.exams_data if e.get('_id') == exam.get('id')), None)
+                                if exam_details:
+                                    teacher_id = exam_details.get('createdBy')
+                            
+                            if teacher_id and db.publish_exam(exam.get('id'), teacher_id):
+                                success_count += 1
+                        
+                        st.success(f"Published {success_count} out of {len(draft_exams)} draft exams!")
+                        st.rerun()
+                    else:
+                        st.info("No draft exams found.")
+                except Exception as e:
+                    st.error(f"Error publishing exams: {e}")
+            
+            # Delete all unpublished exams
+            if st.button("🗑️ Delete All Draft Exams", use_container_width=True, type="secondary"):
+                try:
+                    db = st.session_state.db
+                    exams = db.get_all_exams()
+                    draft_exams = [e for e in exams if not e.get('isPublished')]
+                    
+                    if draft_exams:
+                        success_count = 0
+                        for exam in draft_exams:
+                            if db.delete_exam(exam.get('id')):
+                                success_count += 1
+                        
+                        st.success(f"Deleted {success_count} out of {len(draft_exams)} draft exams!")
+                        st.rerun()
+                    else:
+                        st.info("No draft exams found.")
+                except Exception as e:
+                    st.error(f"Error deleting exams: {e}")
+        
+        with col2:
+            st.subheader("All Exams")
+            
+            try:
+                db = st.session_state.db
+                exams = db.get_all_exams()
+                
+                if exams:
+                    st.info(f"Total Exams: {len(exams)}")
+                    
+                    # Filter options
+                    col_filter1, col_filter2 = st.columns(2)
+                    with col_filter1:
+                        status_filter = st.selectbox("Filter by Status", ["All", "Published", "Draft"])
+                    with col_filter2:
+                        teacher_search = st.text_input("Search by teacher name")
+                    
+                    filtered_exams = exams
+                    if status_filter == "Published":
+                        filtered_exams = [e for e in filtered_exams if e.get('isPublished')]
+                    elif status_filter == "Draft":
+                        filtered_exams = [e for e in filtered_exams if not e.get('isPublished')]
+                    
+                    if teacher_search:
+                        filtered_exams = [e for e in filtered_exams if teacher_search.lower() in e.get('teacher', '').lower()]
+                    
+                    st.write(f"Showing {len(filtered_exams)} exams")
+                    
+                    for exam in filtered_exams:
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        
+                        with col1:
+                            status_icon = "🟢" if exam.get('isPublished') else "🔴"
+                            status_text = "Published" if exam.get('isPublished') else "Draft"
+                            st.write(f"**{exam.get('title', 'Untitled')}**")
+                            st.write(f"⏱️ Duration: {exam.get('duration', 0)} min | Status: {status_icon} {status_text}")
+                            st.write(f"👨‍🏫 Teacher: {exam.get('teacher', 'Unknown')}")
+                            created_date = exam.get('createdAt', datetime.now())
+                            if hasattr(created_date, 'strftime'):
+                                st.write(f"📅 Created: {created_date.strftime('%Y-%m-%d')}")
+                            else:
+                                st.write(f"📅 Created: {created_date}")
+                        
+                        with col2:
+                            # Publish/Unpublish button
+                            if exam.get('isPublished'):
+                                if st.button("📝 Unpublish", key=f"unpublish_{exam.get('id', '')}"):
+                                    # For unpublishing, we need teacher ID
+                                    teacher_id = None
+                                    if db.using_mongodb:
+                                        exam_details = db.exams.find_one({"_id": ObjectId(exam.get('id'))})
+                                        if exam_details:
+                                            teacher_id = exam_details.get('createdBy')
+                                    else:
+                                        exam_details = next((e for e in db.exams_data if e.get('_id') == exam.get('id')), None)
+                                        if exam_details:
+                                            teacher_id = exam_details.get('createdBy')
+                                    
+                                    if teacher_id and db.unpublish_exam(exam.get('id'), teacher_id):
+                                        st.success("Exam unpublished successfully!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to unpublish exam")
+                            else:
+                                if st.button("📢 Publish", key=f"publish_{exam.get('id', '')}"):
+                                    teacher_id = None
+                                    if db.using_mongodb:
+                                        exam_details = db.exams.find_one({"_id": ObjectId(exam.get('id'))})
+                                        if exam_details:
+                                            teacher_id = exam_details.get('createdBy')
+                                    else:
+                                        exam_details = next((e for e in db.exams_data if e.get('_id') == exam.get('id')), None)
+                                        if exam_details:
+                                            teacher_id = exam_details.get('createdBy')
+                                    
+                                    if teacher_id and db.publish_exam(exam.get('id'), teacher_id):
+                                        st.success("Exam published successfully!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to publish exam")
+                        
+                        with col3:
+                            # Delete exam button
+                            if st.button("🗑️ Delete", key=f"delete_exam_{exam.get('id', '')}", type="secondary"):
+                                if db.delete_exam(exam.get('id')):
+                                    st.success("Exam deleted successfully!")
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to delete exam")
+                        
+                        st.divider()
+                else:
+                    st.info("No exams found.")
+            
+            except Exception as e:
+                st.error(f"Error loading exams: {e}")
+    
+    with tab3:
         st.subheader("System Overview")
         
         col1, col2 = st.columns(2)
@@ -761,8 +950,14 @@ def show_admin_dashboard(user):
                 exams = db.get_all_exams()
                 
                 if exams:
-                    st.info(f"Total Exams: {len(exams)}")
-                    for exam in exams:
+                    published_count = len([e for e in exams if e.get('isPublished')])
+                    draft_count = len([e for e in exams if not e.get('isPublished')])
+                    
+                    st.metric("Total Exams", len(exams))
+                    st.metric("Published Exams", published_count)
+                    st.metric("Draft Exams", draft_count)
+                    
+                    for exam in exams[:5]:  # Show first 5 exams
                         status_class = "success-status" if exam.get('isPublished') else "draft-status"
                         status_text = "Published" if exam.get('isPublished') else "Draft"
                         
@@ -770,6 +965,9 @@ def show_admin_dashboard(user):
                         st.write(f"Duration: {exam.get('duration', 0)} min | Status: <span class='{status_class}'>{status_text}</span>", unsafe_allow_html=True)
                         st.write(f"Teacher: {exam.get('teacher', 'Unknown')}")
                         st.divider()
+                    
+                    if len(exams) > 5:
+                        st.info(f"... and {len(exams) - 5} more exams")
                 else:
                     st.info("No exams found.")
             except Exception as e:
@@ -782,8 +980,9 @@ def show_admin_dashboard(user):
                 results = db.get_all_results()
                 
                 if results:
-                    st.info(f"Total Results: {len(results)}")
-                    for result in results:
+                    st.metric("Total Attempts", len(results))
+                    
+                    for result in results[:5]:  # Show first 5 results
                         st.write(f"**{result.get('exam_title', 'Unknown')}**")
                         st.write(f"Student: {result.get('student_name', 'Unknown')}")
                         st.write(f"Score: {result.get('score', 0)}/{result.get('total', 1)} ({result.get('percentage', 0):.1f}%)")
@@ -793,12 +992,15 @@ def show_admin_dashboard(user):
                         else:
                             st.write(f"Submitted: {submitted_date}")
                         st.divider()
+                    
+                    if len(results) > 5:
+                        st.info(f"... and {len(results) - 5} more results")
                 else:
                     st.info("No results found.")
             except Exception as e:
                 st.error(f"Error loading results: {e}")
     
-    with tab3:
+    with tab4:
         st.subheader("System Analytics")
         
         try:

@@ -639,3 +639,100 @@ class Database:
         except Exception as e:
             st.error(f"Error getting analytics: {e}")
             return {}
+        
+    # Add these methods to the Database class
+
+    def delete_user(self, user_id):
+        """Delete a user by ID"""
+        try:
+            if self.using_mongodb:
+                # Check if user exists
+                user = self.users.find_one({"_id": ObjectId(user_id)})
+                if not user:
+                    return False
+                
+                # Don't allow deletion if user has created exams
+                exams_count = self.exams.count_documents({"createdBy": user_id})
+                if exams_count > 0:
+                    st.error(f"Cannot delete user. They have created {exams_count} exam(s).")
+                    return False
+                
+                # Delete user
+                result = self.users.delete_one({"_id": ObjectId(user_id)})
+                return result.deleted_count > 0
+            else:
+                # In-memory database
+                user_index = next((i for i, u in enumerate(self.users_data) if u.get('_id') == user_id), None)
+                if user_index is not None:
+                    user = self.users_data[user_index]
+                    
+                    # Check if user has created exams
+                    exams_count = len([e for e in self.exams_data if e.get('createdBy') == user_id])
+                    if exams_count > 0:
+                        st.error(f"Cannot delete user. They have created {exams_count} exam(s).")
+                        return False
+                    
+                    # Delete user
+                    del self.users_data[user_index]
+                    return True
+                return False
+        except Exception as e:
+            st.error(f"Error deleting user: {e}")
+            return False
+
+    def delete_exam(self, exam_id):
+        """Delete an exam by ID"""
+        try:
+            if self.using_mongodb:
+                # Check if exam exists
+                exam = self.exams.find_one({"_id": ObjectId(exam_id)})
+                if not exam:
+                    return False
+                
+                # Check if exam has results
+                results_count = self.results.count_documents({"exam": exam_id})
+                if results_count > 0:
+                    st.error(f"Cannot delete exam. It has {results_count} result(s).")
+                    return False
+                
+                # Delete exam
+                result = self.exams.delete_one({"_id": ObjectId(exam_id)})
+                return result.deleted_count > 0
+            else:
+                # In-memory database
+                exam_index = next((i for i, e in enumerate(self.exams_data) if e.get('_id') == exam_id), None)
+                if exam_index is not None:
+                    exam = self.exams_data[exam_index]
+                    
+                    # Check if exam has results
+                    results_count = len([r for r in self.results_data if r.get('exam') == exam_id])
+                    if results_count > 0:
+                        st.error(f"Cannot delete exam. It has {results_count} result(s).")
+                        return False
+                    
+                    # Delete exam
+                    del self.exams_data[exam_index]
+                    return True
+                return False
+        except Exception as e:
+            st.error(f"Error deleting exam: {e}")
+            return False
+
+    def unpublish_exam(self, exam_id, teacher_id):
+        """Unpublish an exam"""
+        try:
+            if self.using_mongodb:
+                result = self.exams.update_one(
+                    {"_id": ObjectId(exam_id), "createdBy": teacher_id},
+                    {"$set": {"isPublished": False}}
+                )
+                return result.modified_count > 0
+            else:
+                exam = next((e for e in self.exams_data if e.get('_id') == exam_id and e.get('createdBy') == teacher_id), None)
+                if exam:
+                    exam["isPublished"] = False
+                    return True
+                return False
+        except Exception as e:
+            st.error(f"Error unpublishing exam: {e}")
+            return False
