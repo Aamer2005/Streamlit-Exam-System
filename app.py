@@ -375,18 +375,21 @@ def show_student_dashboard(user):
             
             if exams:
                 st.info(f"Found {len(exams)} published exam(s) available")
-                for exam in exams:
+                for i, exam in enumerate(exams):
+                    # Create a card using Streamlit components only
                     with st.container():
-                        st.markdown(f"""
-                        <div class="exam-card">
-                            <h4>{exam.get('title', 'Untitled Exam')}</h4>
-                            <p>Duration: {exam.get('duration', 30)} minutes</p>
-                            <p>Questions: {len(exam.get('questions', []))}</p>
-                            <p>Created by: {exam.get('teacher', 'Unknown')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.write(f"### 📝 {exam.get('title', 'Untitled Exam')}")
                         
-                        if st.button(f"Start Exam", key=f"start_{exam.get('id', '')}"):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.write(f"**Duration:** {exam.get('duration', 30)} minutes")
+                        with col2:
+                            st.write(f"**Questions:** {len(exam.get('questions', []))}")
+                        with col3:
+                            st.write(f"**Teacher:** {exam.get('teacher', 'Unknown')}")
+                        
+                        # Start exam button
+                        if st.button(f"Start This Exam", key=f"start_{exam.get('id', '')}"):
                             # Initialize exam session state
                             st.session_state.current_exam = exam
                             st.session_state.exam_started = True
@@ -394,6 +397,8 @@ def show_student_dashboard(user):
                             st.session_state.exam_answers = {}
                             st.session_state.exam_submitted = False
                             st.rerun()
+                        
+                        st.write("---")
             else:
                 st.info("No exams available at the moment. Check back later or contact your teacher.")
         
